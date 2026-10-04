@@ -16,209 +16,167 @@ jobs:
 
     steps:
 
-      # ==========================================
+      # =========================================
       # CHECKOUT
-      # ==========================================
-      - name: Checkout repository
+      # =========================================
+      - name: Checkout
         uses: actions/checkout@v7
 
-      # ==========================================
+      # =========================================
       # JAVA 21
-      # ==========================================
+      # =========================================
       - name: Setup Java 21
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
-      # ==========================================
-      # GRADLE ACTION
-      # ==========================================
-      - name: Setup Gradle
+      # =========================================
+      # GRADLE 9.2.1
+      # Không dùng gradlew để tải Gradle nữa
+      # =========================================
+      - name: Setup Gradle 9.2.1
         uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.2.1'
 
-      # ==========================================
+      # =========================================
+      # SHOW ENVIRONMENT
+      # =========================================
+      - name: Check environment
+        shell: bash
+        run: |
+          set -e
+
+          echo "=============================="
+          echo "JAVA"
+          echo "=============================="
+          java -version
+
+          echo ""
+          echo "=============================="
+          echo "GRADLE"
+          echo "=============================="
+          gradle --version
+
+          echo ""
+          echo "=============================="
+          echo "FILES"
+          echo "=============================="
+          find . -maxdepth 2 -type f | sort
+
+      # =========================================
       # FIND PROJECT
-      # ==========================================
-      - name: Find Gradle project
+      # =========================================
+      - name: Find project
         id: project
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "Searching for Gradle project..."
-          echo "======================================"
-
           PROJECT_DIR=""
 
-          # --------------------------------------
-          # Case 1: gradlew already exists
-          # --------------------------------------
-          FOUND=$(find . \
-            -type f \
-            -name "gradlew" \
-            -not -path "./.git/*" \
-            -print \
-            -quit)
-
-          if [ -n "$FOUND" ]; then
-            PROJECT_DIR=$(dirname "$FOUND")
-            echo "Found gradlew:"
-            echo "$FOUND"
-          fi
-
-          # --------------------------------------
-          # Case 2: source ZIP exists
-          # --------------------------------------
-          if [ -z "$PROJECT_DIR" ]; then
-
-            echo ""
-            echo "No gradlew found."
-            echo "Searching for source ZIP..."
-
-            SOURCE_ZIP=$(find . \
+          # Repository root
+          if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            PROJECT_DIR="."
+          else
+            # Search subdirectories
+            BUILD_FILE=$(find . \
               -type f \
-              \( -name "*.zip" -o -name "*.ZIP" \) \
+              \( -name "build.gradle" -o -name "build.gradle.kts" \) \
               -not -path "./.git/*" \
               -print \
               -quit)
 
-            if [ -n "$SOURCE_ZIP" ]; then
-
-              echo "Found ZIP:"
-              echo "$SOURCE_ZIP"
-
-              rm -rf project
-              mkdir -p project
-
-              unzip -q "$SOURCE_ZIP" -d project
-
-              FOUND=$(find project \
-                -type f \
-                -name "gradlew" \
-                -print \
-                -quit)
-
-              if [ -n "$FOUND" ]; then
-                PROJECT_DIR=$(dirname "$FOUND")
-                echo "Extracted project:"
-                echo "$PROJECT_DIR"
-              fi
+            if [ -n "$BUILD_FILE" ]; then
+              PROJECT_DIR=$(dirname "$BUILD_FILE")
             fi
           fi
 
-          # --------------------------------------
-          # Verify project
-          # --------------------------------------
           if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Gradle project not found."
             echo ""
-            echo "ERROR: Could not find Gradle project."
-            echo ""
-            echo "Files in repository:"
-            find . -maxdepth 4 -type f | sort
+            echo "Searching all files:"
+            find . -maxdepth 5 -type f | sort
             exit 1
           fi
 
-          # Normalize path
           PROJECT_DIR="${PROJECT_DIR#./}"
 
-          if [ "$PROJECT_DIR" = "" ]; then
+          if [ -z "$PROJECT_DIR" ]; then
             PROJECT_DIR="."
           fi
 
-          echo ""
-          echo "======================================"
-          echo "PROJECT DIRECTORY"
-          echo "======================================"
-          echo "$PROJECT_DIR"
-
+          echo "Project directory: $PROJECT_DIR"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      # ==========================================
-      # CHECK PROJECT
-      # ==========================================
+      # =========================================
+      # VERIFY PROJECT
+      # =========================================
       - name: Verify project
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "PROJECT FILES"
-          echo "======================================"
+          echo "=============================="
+          echo "PROJECT"
+          echo "=============================="
 
           pwd
           ls -la
 
           echo ""
-          echo "Gradle wrapper:"
-          ls -la gradlew
+          echo "build.gradle:"
+          if [ -f build.gradle ]; then
+            cat build.gradle
+          fi
 
           echo ""
-          echo "Java:"
-          java -version
+          echo "gradle.properties:"
+          if [ -f gradle.properties ]; then
+            cat gradle.properties
+          fi
 
-          echo ""
-          echo "Gradle wrapper version:"
-          bash gradlew --version
-
-      # ==========================================
-      # FIX GRADLE WRAPPER
-      # ==========================================
-      - name: Prepare Gradle wrapper
-        working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
-        run: |
-          set -e
-
-          chmod +x gradlew
-
-          # Remove Windows CRLF if present
-          sed -i 's/\r$//' gradlew
-
-          echo "Gradle wrapper prepared."
-          ls -la gradlew
-
-      # ==========================================
+      # =========================================
       # BUILD
-      # ==========================================
+      # =========================================
       - name: Build
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          set -e
+          set -o pipefail
 
-          echo "======================================"
-          echo "STARTING BUILD"
-          echo "======================================"
+          echo "=============================="
+          echo "START BUILD"
+          echo "=============================="
 
-          bash gradlew clean build \
+          gradle clean build \
             --no-daemon \
-            --stacktrace
+            --stacktrace \
+            --info
 
-      # ==========================================
+      # =========================================
       # SHOW OUTPUT
-      # ==========================================
+      # =========================================
       - name: Show build output
         if: always()
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          echo "======================================"
+          echo "=============================="
           echo "BUILD OUTPUT"
-          echo "======================================"
+          echo "=============================="
 
           if [ -d "build/libs" ]; then
             ls -lah build/libs
           else
-            echo "build/libs does not exist."
+            echo "build/libs was not created."
           fi
 
-      # ==========================================
+      # =========================================
       # UPLOAD JAR
-      # ==========================================
+      # =========================================
       - name: Upload JAR
         if: success()
         uses: actions/upload-artifact@v7
