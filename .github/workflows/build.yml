@@ -1,6 +1,9 @@
 name: Build ZenithDLC 1.21.11
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -8,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download source ZIP
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Extract source
@@ -22,9 +25,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Build
-        working-directory: project
+      - name: Find project
         run: |
+          echo "Searching for Gradle project..."
+          find project -name gradlew -type f
+
+      - name: Build
+        run: |
+          PROJECT_DIR=$(dirname "$(find project -name gradlew -type f | head -1)")
+          echo "Project: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
           chmod +x gradlew
           ./gradlew clean build --no-daemon
 
@@ -32,4 +42,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZenithDLC-1.21.11
-          path: project/build/libs/*.jar
+          path: project/**/build/libs/*.jar
