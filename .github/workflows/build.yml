@@ -1,4 +1,4 @@
-name: Build ZenithDLC
+name: Build Minecraft 1.21.11
 
 on:
   push:
@@ -15,15 +15,16 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      # =========================
-      # Checkout
-      # =========================
-      - name: Checkout source
+
+      # ==========================================
+      # CHECKOUT
+      # ==========================================
+      - name: Checkout repository
         uses: actions/checkout@v7
 
-      # =========================
-      # Java 21
-      # =========================
+      # ==========================================
+      # JAVA 21
+      # ==========================================
       - name: Setup Java 21
         uses: actions/setup-java@v6
         with:
@@ -31,153 +32,198 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      # =========================
-      # Setup Gradle
-      # =========================
+      # ==========================================
+      # GRADLE ACTION
+      # ==========================================
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      # =========================
-      # Find / extract project
-      # =========================
-      - name: Prepare project
+      # ==========================================
+      # FIND PROJECT
+      # ==========================================
+      - name: Find Gradle project
         id: project
         shell: bash
         run: |
           set -e
 
+          echo "======================================"
           echo "Searching for Gradle project..."
+          echo "======================================"
 
-          # Project is already at repository root
-          if [ -f "./gradlew" ]; then
-            PROJECT_DIR="."
-            echo "Found project at repository root."
+          PROJECT_DIR=""
 
-          else
-            # Search for a Gradle project
-            FOUND_GRADLEW=$(find . \
+          # --------------------------------------
+          # Case 1: gradlew already exists
+          # --------------------------------------
+          FOUND=$(find . \
+            -type f \
+            -name "gradlew" \
+            -not -path "./.git/*" \
+            -print \
+            -quit)
+
+          if [ -n "$FOUND" ]; then
+            PROJECT_DIR=$(dirname "$FOUND")
+            echo "Found gradlew:"
+            echo "$FOUND"
+          fi
+
+          # --------------------------------------
+          # Case 2: source ZIP exists
+          # --------------------------------------
+          if [ -z "$PROJECT_DIR" ]; then
+
+            echo ""
+            echo "No gradlew found."
+            echo "Searching for source ZIP..."
+
+            SOURCE_ZIP=$(find . \
               -type f \
-              -name "gradlew" \
+              \( -name "*.zip" -o -name "*.ZIP" \) \
               -not -path "./.git/*" \
-              -print -quit)
+              -print \
+              -quit)
 
-            if [ -n "$FOUND_GRADLEW" ]; then
-              PROJECT_DIR="$(dirname "$FOUND_GRADLEW")"
-              echo "Found Gradle project: $PROJECT_DIR"
+            if [ -n "$SOURCE_ZIP" ]; then
 
-            else
-              # Search for source ZIP
-              SOURCE_ZIP=$(find . \
-                -maxdepth 3 \
-                -type f \
-                -name "*.zip" \
-                -not -path "./.git/*" \
-                -print -quit)
+              echo "Found ZIP:"
+              echo "$SOURCE_ZIP"
 
-              if [ -z "$SOURCE_ZIP" ]; then
-                echo "ERROR: No Gradle project or source ZIP found."
-                exit 1
-              fi
-
-              echo "Found source ZIP: $SOURCE_ZIP"
-
+              rm -rf project
               mkdir -p project
 
               unzip -q "$SOURCE_ZIP" -d project
 
-              # Find gradlew after extraction
-              FOUND_GRADLEW=$(find project \
+              FOUND=$(find project \
                 -type f \
                 -name "gradlew" \
-                -print -quit)
+                -print \
+                -quit)
 
-              if [ -z "$FOUND_GRADLEW" ]; then
-                echo "ERROR: gradlew was not found after extracting ZIP."
-                exit 1
+              if [ -n "$FOUND" ]; then
+                PROJECT_DIR=$(dirname "$FOUND")
+                echo "Extracted project:"
+                echo "$PROJECT_DIR"
               fi
-
-              PROJECT_DIR="$(dirname "$FOUND_GRADLEW")"
-
-              echo "Extracted project: $PROJECT_DIR"
             fi
           fi
 
-          # Remove ./ prefix
+          # --------------------------------------
+          # Verify project
+          # --------------------------------------
+          if [ -z "$PROJECT_DIR" ]; then
+            echo ""
+            echo "ERROR: Could not find Gradle project."
+            echo ""
+            echo "Files in repository:"
+            find . -maxdepth 4 -type f | sort
+            exit 1
+          fi
+
+          # Normalize path
           PROJECT_DIR="${PROJECT_DIR#./}"
 
-          if [ -z "$PROJECT_DIR" ]; then
+          if [ "$PROJECT_DIR" = "" ]; then
             PROJECT_DIR="."
           fi
 
-          echo "Project directory: $PROJECT_DIR"
+          echo ""
+          echo "======================================"
+          echo "PROJECT DIRECTORY"
+          echo "======================================"
+          echo "$PROJECT_DIR"
 
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      # =========================
-      # Verify Java / Gradle
-      # =========================
-      - name: Show environment
+      # ==========================================
+      # CHECK PROJECT
+      # ==========================================
+      - name: Verify project
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          echo "===== Java ====="
-          java -version
+          set -e
 
-          echo ""
-          echo "===== Gradle ====="
-          ./gradlew --version
+          echo "======================================"
+          echo "PROJECT FILES"
+          echo "======================================"
 
-          echo ""
-          echo "===== Project ====="
           pwd
           ls -la
 
-      # =========================
-      # Fix permissions
-      # =========================
-      - name: Make Gradle executable
+          echo ""
+          echo "Gradle wrapper:"
+          ls -la gradlew
+
+          echo ""
+          echo "Java:"
+          java -version
+
+          echo ""
+          echo "Gradle wrapper version:"
+          bash gradlew --version
+
+      # ==========================================
+      # FIX GRADLE WRAPPER
+      # ==========================================
+      - name: Prepare Gradle wrapper
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
+          set -e
+
           chmod +x gradlew
 
-      # =========================
-      # Build
-      # =========================
+          # Remove Windows CRLF if present
+          sed -i 's/\r$//' gradlew
+
+          echo "Gradle wrapper prepared."
+          ls -la gradlew
+
+      # ==========================================
+      # BUILD
+      # ==========================================
       - name: Build
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           set -e
 
-          echo "Starting Gradle build..."
+          echo "======================================"
+          echo "STARTING BUILD"
+          echo "======================================"
 
-          ./gradlew clean build \
+          bash gradlew clean build \
             --no-daemon \
-            --stacktrace \
-            --info
+            --stacktrace
 
-      # =========================
-      # Show generated JARs
-      # =========================
+      # ==========================================
+      # SHOW OUTPUT
+      # ==========================================
       - name: Show build output
         if: always()
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          echo "===== Build output ====="
+          echo "======================================"
+          echo "BUILD OUTPUT"
+          echo "======================================"
 
           if [ -d "build/libs" ]; then
             ls -lah build/libs
           else
-            echo "No build/libs directory found."
+            echo "build/libs does not exist."
           fi
 
-      # =========================
-      # Upload JAR
-      # =========================
+      # ==========================================
+      # UPLOAD JAR
+      # ==========================================
       - name: Upload JAR
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ZenithD
+          name: ZenithDLC-1.21.11
+          path: ${{ steps.project.outputs.dir }}/build/libs/*.jar
+          if-no-files-found: error
+          compression-level: 9
